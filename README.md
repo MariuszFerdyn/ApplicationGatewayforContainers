@@ -49,7 +49,7 @@ az provider register --namespace Microsoft.ServiceNetworking
 
 # Register the AGC add-on preview features (one-time per subscription).
 # Both are required for the REST API path; skipping returns PreviewFeatureNotRegistered.
-az feature register --namespace Microsoft.ContainerService --name ApplicationLoadBalancerPreview
+az feature register --namespace Microsoft.ContainerService --name ApplicationLoadBalancerPreview  #Consult with Microsoft before use in PROD
 az feature register --namespace Microsoft.ContainerService --name ManagedGatewayAPIPreview
 
 # Wait until BOTH report "Registered" (can take a few minutes)
