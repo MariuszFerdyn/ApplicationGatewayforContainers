@@ -1,0 +1,92 @@
+# EXPERIMENTAL (working): external public website as an AGC backend via a hand-authored EndpointSlice,
+# exposed on its OWN dedicated frontend/FQDN. Not documented by Microsoft for AGC, but verified working.
+# The backend IP is injected by the command in README Step 4.
+
+# --- Backend: selector-less Service + manual EndpointSlice pointing at the external public IP ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rzetelnekursy-ext
+  namespace: default
+spec:
+  ports:
+    - name: https
+      port: 443
+      targetPort: 443
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: rzetelnekursy-ext-1
+  namespace: default
+  labels:
+    kubernetes.io/service-name: rzetelnekursy-ext
+addressType: IPv4
+ports:
+  - name: https
+    port: 443
+    protocol: TCP
+endpoints:
+  - addresses: ["__RESOLVED_IP__"]
+    conditions:
+      ready: true
+---
+# --- Backend TLS: HTTPS to the origin with correct SNI. No `verify` block -> AGC trusts public CAs by default. ---
+apiVersion: alb.networking.azure.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: rzetelnekursy-tls
+  namespace: default
+spec:
+  targetRef:
+    group: ""
+    kind: Service
+    name: rzetelnekursy-ext
+    namespace: default
+  default:
+    sni: rzetelnekursy.pl
+    ports:
+      - port: 443
+---
+# --- Dedicated Gateway: same alb-namespace/alb-name as the app -> the ALB Controller
+#     auto-provisions a SECOND frontend + FQDN for this Gateway (managed model). ---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ext-gateway
+  namespace: default
+  annotations:
+    alb.networking.azure.io/alb-namespace: default
+    alb.networking.azure.io/alb-name: alb
+spec:
+  gatewayClassName: azure-alb-external
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+# --- Route: match "/" and rewrite the Host sent to the origin via URLRewrite.hostname.
+#     (Use URLRewrite.hostname, NOT a RequestHeaderModifier "Host" header — the latter is not
+#      programmable on AGC and leaves the route Accepted-but-Programmed=False.) ---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-rzetelnekursy
+  namespace: default
+spec:
+  parentRefs:
+    - name: ext-gateway
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: rzetelnekursy.pl
+      backendRefs:
+        - name: rzetelnekursy-ext
+          port: 443
